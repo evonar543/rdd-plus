@@ -1,5 +1,6 @@
 import RddApp from "@/components/RddApp";
+import { version } from "@/package.json";
 
 export default function Home() {
-  return <RddApp />;
+  return <RddApp version={version} />;
 }

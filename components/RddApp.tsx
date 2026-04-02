@@ -120,7 +120,7 @@ const EXTRACT_ROOTS_STUDIO: Record<string, string> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function RddApp() {
+export default function RddApp({ version: appVersion }: { version: string }) {
   const [binaryType, setBinaryType] = useState<BinaryType>("WindowsPlayer");
   const [channel, setChannel] = useState("LIVE");
   const [version, setVersion] = useState("");
@@ -503,6 +503,9 @@ export default function RddApp() {
             <h1 className="text-2xl font-bold tracking-tight font-mono">RDD+</h1>
             <Badge variant="secondary" className="font-mono text-xs">
               Roblox Deployment Downloader
+            </Badge>
+            <Badge variant="outline" className="font-mono text-xs text-muted-foreground ml-auto">
+              v{appVersion}
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
