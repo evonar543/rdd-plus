@@ -25,6 +25,13 @@ interface LogEntry {
   kind: "info" | "ok" | "warn" | "error";
 }
 
+interface CheckResult {
+  valid: boolean;
+  version: string;
+  binaryType?: string;
+  packageCount?: number;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const HOST_PATH = "https://setup-aws.rbxcdn.com";
@@ -122,9 +129,12 @@ export default function RddApp() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isFetchingVersion, setIsFetchingVersion] = useState(false);
   const [isFetchingHistory, setIsFetchingHistory] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
   const [versionHistory, setVersionHistory] = useState<VersionEntry[]>([]);
   const [nBack, setNBack] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [quickInput, setQuickInput] = useState("");
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const log = useCallback((text: string, kind: LogEntry["kind"] = "info") => {
@@ -196,6 +206,72 @@ export default function RddApp() {
     fetchHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [binaryType, channel]);
+
+  // ── Quick import: parse a hash or a full RDD/RDD+ URL ─────────────────────
+  function applyQuickInput(raw: string) {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+
+    // Try to parse as a URL first (handles rdd.latte.to and our own links)
+    try {
+      const url = new URL(
+        trimmed.startsWith("http") ? trimmed : `https://placeholder.com?${trimmed}`
+      );
+      const p = url.searchParams;
+      const v = p.get("version") || p.get("guid") || "";
+      const bt = p.get("binaryType") as BinaryType | null;
+      const ch = p.get("channel") || "";
+
+      if (v) {
+        const resolved = v.startsWith("version-") ? v : `version-${v}`;
+        setVersion(resolved);
+        setNBack(0);
+        setCheckResult(null);
+        if (bt && BINARY_TYPES.some((b) => b.id === bt)) setBinaryType(bt);
+        if (ch) setChannel(ch);
+        setQuickInput("");
+        return;
+      }
+    } catch {
+      // not a URL
+    }
+
+    // Treat as a raw hash
+    const cleaned = trimmed.replace(/^version-/i, "");
+    if (/^[a-f0-9]{16}$/i.test(cleaned)) {
+      const resolved = `version-${cleaned.toLowerCase()}`;
+      setVersion(resolved);
+      setNBack(0);
+      setCheckResult(null);
+      setQuickInput("");
+    } else if (/^version-[a-f0-9]+$/i.test(trimmed)) {
+      setVersion(trimmed.toLowerCase());
+      setNBack(0);
+      setCheckResult(null);
+      setQuickInput("");
+    }
+  }
+
+  // ── Check version on CDN and auto-detect binary type ──────────────────────
+  async function checkVersion() {
+    if (!version) return;
+    setIsChecking(true);
+    setCheckResult(null);
+    try {
+      const res = await fetch(
+        `/api/check?version=${encodeURIComponent(version)}&channel=${encodeURIComponent(channel)}`
+      );
+      const data: CheckResult = await res.json();
+      setCheckResult(data);
+      if (data.valid && data.binaryType && data.binaryType !== "unknown") {
+        setBinaryType(data.binaryType as BinaryType);
+      }
+    } catch {
+      setCheckResult({ valid: false, version });
+    } finally {
+      setIsChecking(false);
+    }
+  }
 
   // ── Permalink ─────────────────────────────────────────────────────────────
   function getPermalink() {
@@ -410,6 +486,38 @@ export default function RddApp() {
 
         <Separator />
 
+        {/* Quick Import */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              Quick Import
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Paste a version hash or an RDD URL — channel, platform, and version will be set automatically.
+            </p>
+            <div className="flex gap-2">
+              <Input
+                value={quickInput}
+                onChange={(e) => setQuickInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && applyQuickInput(quickInput)}
+                placeholder="version-6776addb8fbc4d17  or  https://rdd.latte.to/?..."
+                className="font-mono text-sm"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => applyQuickInput(quickInput)}
+                disabled={!quickInput.trim()}
+                className="shrink-0"
+              >
+                Import
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Platform selection */}
         <Card>
           <CardHeader className="pb-3">
@@ -499,7 +607,7 @@ export default function RddApp() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Auto-detect row */}
+            {/* Manual hash entry + fetch current */}
             <div className="flex gap-2">
               <Button
                 onClick={fetchCurrentVersion}
@@ -515,11 +623,51 @@ export default function RddApp() {
                 onChange={(e) => {
                   setVersion(e.target.value);
                   setNBack(0);
+                  setCheckResult(null);
                 }}
+                onKeyDown={(e) => e.key === "Enter" && checkVersion()}
                 placeholder="version-xxxxxxxxxxxxxxxx"
-                className="font-mono text-sm"
+                className={cn(
+                  "font-mono text-sm",
+                  checkResult?.valid === true && "border-emerald-500/50",
+                  checkResult?.valid === false && "border-red-500/50"
+                )}
               />
+              <Button
+                onClick={checkVersion}
+                disabled={!version || isChecking || isDownloading}
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                title="Validate hash on CDN and auto-detect platform"
+              >
+                {isChecking ? "…" : "Check"}
+              </Button>
             </div>
+
+            {/* Check result */}
+            {checkResult && (
+              <div className={cn(
+                "rounded-md border px-3 py-2 text-xs font-mono",
+                checkResult.valid
+                  ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
+                  : "border-red-500/30 bg-red-500/5 text-red-400"
+              )}>
+                {checkResult.valid ? (
+                  <>
+                    <span className="text-emerald-400">✓ Valid</span>
+                    {checkResult.binaryType && checkResult.binaryType !== "unknown" && (
+                      <span className="text-zinc-400"> · auto-set platform to <span className="text-foreground">{checkResult.binaryType}</span></span>
+                    )}
+                    {checkResult.packageCount !== undefined && (
+                      <span className="text-zinc-400"> · {checkResult.packageCount} packages</span>
+                    )}
+                  </>
+                ) : (
+                  <span>✗ Version not found on CDN — check the hash and channel</span>
+                )}
+              </div>
+            )}
 
             {/* N-back selector */}
             {versionHistory.length > 0 && (
