@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -171,8 +172,10 @@ export default function RddApp() {
         return;
       }
       log(`Current version: ${v}`, "ok");
-      setVersion(v.startsWith("version-") ? v : `version-${v}`);
+      const resolved = v.startsWith("version-") ? v : `version-${v}`;
+      setVersion(resolved);
       setNBack(0);
+      toast.success("Version fetched", { description: resolved });
     } catch (e) {
       log(`Error: ${e}`, "error");
     } finally {
@@ -230,6 +233,9 @@ export default function RddApp() {
         if (bt && BINARY_TYPES.some((b) => b.id === bt)) setBinaryType(bt);
         if (ch) setChannel(ch);
         setQuickInput("");
+        toast.success("URL imported", {
+          description: `${bt ?? "?"} · ${ch || "LIVE"} · ${resolved}`,
+        });
         return;
       }
     } catch {
@@ -244,11 +250,18 @@ export default function RddApp() {
       setNBack(0);
       setCheckResult(null);
       setQuickInput("");
+      toast.success("Hash imported", { description: resolved });
     } else if (/^version-[a-f0-9]+$/i.test(trimmed)) {
-      setVersion(trimmed.toLowerCase());
+      const v = trimmed.toLowerCase();
+      setVersion(v);
       setNBack(0);
       setCheckResult(null);
       setQuickInput("");
+      toast.success("Hash imported", { description: v });
+    } else {
+      toast.error("Unrecognized input", {
+        description: "Paste a version hash (version-xxxx) or a full RDD URL.",
+      });
     }
   }
 
@@ -263,11 +276,23 @@ export default function RddApp() {
       );
       const data: CheckResult = await res.json();
       setCheckResult(data);
-      if (data.valid && data.binaryType && data.binaryType !== "unknown") {
-        setBinaryType(data.binaryType as BinaryType);
+      if (data.valid) {
+        if (data.binaryType && data.binaryType !== "unknown") {
+          setBinaryType(data.binaryType as BinaryType);
+          toast.success("Version validated", {
+            description: `${data.binaryType} · ${data.packageCount ?? "?"} packages`,
+          });
+        } else {
+          toast.success("Version found on CDN");
+        }
+      } else {
+        toast.error("Version not found", {
+          description: "Check the hash and selected channel.",
+        });
       }
     } catch {
       setCheckResult({ valid: false, version });
+      toast.error("Check failed — CDN unreachable");
     } finally {
       setIsChecking(false);
     }
@@ -288,9 +313,11 @@ export default function RddApp() {
   }
 
   async function copyLink() {
-    await navigator.clipboard.writeText(getPermalink());
+    const link = getPermalink();
+    await navigator.clipboard.writeText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    toast.info("Link copied!", { description: link, duration: 3000 });
   }
 
   // ── Download logic ────────────────────────────────────────────────────────
@@ -339,6 +366,10 @@ export default function RddApp() {
         log("Download complete — saving file…", "ok");
         triggerBrowserDownload(outputFileName, data);
         log(`Saved as: ${outputFileName}`, "ok");
+        toast.success("Download complete!", {
+          description: outputFileName,
+          duration: 8000,
+        });
         return;
       }
 
@@ -447,8 +478,13 @@ export default function RddApp() {
       log(`Done — saving file…`, "ok");
       triggerBrowserDownload(outputFileName, outputData);
       log(`Saved as: ${outputFileName}`, "ok");
+      toast.success("Download complete!", {
+        description: outputFileName,
+        duration: 8000,
+      });
     } catch (e) {
       log(`Error: ${e}`, "error");
+      toast.error("Download failed", { description: String(e) });
     } finally {
       setIsDownloading(false);
     }
